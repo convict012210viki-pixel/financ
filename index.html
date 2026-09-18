@@ -355,6 +355,26 @@ function normalizeSalesDoc(doc, branch, monthKey){
   return doc;
 }
 
+/* ======================= RECONCILE SHEET PERSISTENCE ======================= */
+const RECONCILE_KEY = STORE_PREFIX + "reconcile";
+const RECONCILE_DOC_ID = "reconcile_current";
+async function getReconcileDoc(){
+  if(db===null && branchStoreAvailable()){
+    return lsGet(RECONCILE_KEY, null);
+  }
+  try{
+    const snap = await db.doc("reconcile/"+RECONCILE_DOC_ID).get();
+    return (snap && snap.exists) ? snap.data() : null;
+  }catch(e){ return null; }
+}
+async function setReconcileDoc(data){
+  if(db===null && branchStoreAvailable()){
+    if(!lsSet(RECONCILE_KEY, data)) throw new Error("مساحة التخزين المحلية ممتلئة");
+    return true;
+  }
+  return await db.doc("reconcile/"+RECONCILE_DOC_ID).set(data);
+}
+
 /* ======================= APP INIT ======================= */
 async function migrateLocalToDb(){
   if(db===null || !branchStoreAvailable()) return;
@@ -373,6 +393,11 @@ async function migrateLocalToDb(){
     for(const id in authMap){
       const snap = await db.doc("auth/"+id).get();
       if(!(snap && snap.exists)) await db.doc("auth/"+id).set(authMap[id]);
+    }
+    const localReconcile = lsGet(RECONCILE_KEY, null);
+    if(localReconcile){
+      const snap = await db.doc("reconcile/"+RECONCILE_DOC_ID).get();
+      if(!(snap && snap.exists)) await db.doc("reconcile/"+RECONCILE_DOC_ID).set(localReconcile);
     }
   }catch(e){}
 }
@@ -1098,6 +1123,22 @@ async function renderFinanceDashboard(){
     financeTab, "الإدارة المالية",
     `<div class="loading-msg">جاري تحميل بيانات كل الفروع…</div>`
   );
+  if(!financeReconcile){
+    const saved = await getReconcileDoc();
+    if(saved && saved.rows && Array.isArray(saved.rows) && saved.rows.length){
+      financeReconcile = saved;
+      if(saved.view && isPastOrCurrent(saved.view.y, saved.view.m)){
+        financeYear = saved.view.y;
+        financeMonth = saved.view.m;
+        const dim = daysInMonthOf(financeYear, financeMonth);
+        const end = Math.max(1, Math.min(Number(saved.view.end)||dim, dim));
+        const start = Math.max(1, Math.min(Number(saved.view.start)||1, end));
+        financeRefDay = end;
+        financeRangeStart = start;
+        financeRangeEnd = end;
+      }
+    }
+  }
   await loadFinanceMonth();
   renderFinanceBody();
 }
@@ -1284,7 +1325,7 @@ function onReconcileFile(e){
   financeReconcile = null;
   res.innerHTML = "";
   const reader = new FileReader();
-  reader.onload = ev => {
+  reader.onload = async ev => {
     try{
       const wb = XLSX.read(ev.target.result, {type:"array"});
       const ws = wb.Sheets[wb.SheetNames[0]];
@@ -1325,9 +1366,10 @@ function onReconcileFile(e){
           res.innerHTML = "";
           return;
         }
-        financeReconcile = { rows: parsed, fileName: file.name, noDate };
+        financeReconcile = { rows: parsed, fileName: file.name, noDate, updatedAt: Date.now(), view: {y: financeYear, m: financeMonth, start: financeRangeStart, end: financeRangeEnd} };
         info.innerHTML = `<span class="ok-pill">مرفوع: ${esc(file.name)} — ${parsed.length} صف ✓${noDate?` (${noDate} من غير تاريخ واضح)`:"ا"} (${rangeLabel()})</span>`;
         renderReconcileResult(res);
+        try{ await setReconcileDoc(financeReconcile); }catch(saveErr){}
     }catch(ex){
       info.innerHTML = '<span class="alert-pill">تعذر قراءة الملف: ' + esc(ex && ex.message ? ex.message : "خطأ غير معروف") + '</span>';
       res.innerHTML = "";
