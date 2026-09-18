@@ -1049,6 +1049,7 @@ function defaultRefDay(){
 }
 let financeRefDay = defaultRefDay();
 let financePickedBranch = "";
+let financeLookupBranch = "";
 let financeReconcile = null;
 let financeRangeStart = 1, financeRangeEnd = defaultRefDay();
 function rangeDateValue(which){ return financeYear + "-" + dayKey(financeMonth) + "-" + dayKey(which==="start" ? financeRangeStart : financeRangeEnd); }
@@ -1144,6 +1145,20 @@ function onFinanceDatePicked(e){
     if(changedMonth) await loadFinanceMonth();
     renderFinanceBody();
   })();
+}
+function onBranchLookup(value){
+  financeLookupBranch = (value||"").toUpperCase();
+  const code = financeLookupBranch.trim();
+  const el = document.getElementById("branchLookupResult");
+  if(!el) return;
+  if(!code){ el.innerHTML = '<span class="muted" style="font-size:13px;">اكتب كود الفرع فوق (مثال: TNT1)</span>'; return; }
+  const doc = allBranchDocs.find(d=>d.branch===code);
+  if(!doc){ el.innerHTML = '<span class="alert-pill">فرع غير موجود</span>'; return; }
+  el.innerHTML = `<div class="row" style="gap:8px;">
+    <span class="tag">${esc(doc.branch)}</span>
+    <span class="money" style="font-size:19px;">${fmtNum(dayTotal(doc, financeRefDay))}</span>
+    <span class="muted" style="font-size:12.5px;">توتال يوم ${refDayLabel()}</span>
+  </div>`;
 }
 
 function renderFinanceBody(){
@@ -1468,12 +1483,31 @@ function renderFinanceOverview(host){
       </table>`
     : '<p class="muted">لا توجد مبيعات مسجلة هذا الشهر.</p>';
 
+  const lookupCode = (financeLookupBranch||"").trim().toUpperCase();
+  const lookupDoc = lookupCode ? allBranchDocs.find(d=>d.branch===lookupCode) : null;
+  const lookupHtml = lookupCode ? (lookupDoc
+    ? `<div class="row" style="gap:8px;">
+        <span class="tag">${esc(lookupDoc.branch)}</span>
+        <span class="money" style="font-size:19px;">${fmtNum(dayTotal(lookupDoc, refDay))}</span>
+        <span class="muted" style="font-size:12.5px;">توتال يوم ${refDayLabel()}</span>
+      </div>`
+    : `<span class="alert-pill">فرع غير موجود</span>`)
+    : '<span class="muted" style="font-size:13px;">اكتب كود الفرع فوق (مثال: TNT1)</span>';
+
   host.innerHTML = `
     <div class="card">
       <div class="kpi">
         <div class="box"><div class="num">${fmtNum(grandTotal)}</div><div class="lbl">إجمالي مبيعات الشهر (كل الفروع)</div></div>
         <div class="box"><div class="num">${fmtNum(refTotal)}</div><div class="lbl">إجمالي مبيعات يوم ${refDayLabel()}</div></div>
         <div class="box"><div class="num">${reportedRef} / ${BRANCHES.length}</div><div class="lbl">الفروع اللي سجّلت يوم ${refDayLabel()}</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>استعلام فرع — يوم ${refDayLabel()}</h3>
+      <div class="row">
+        <input type="text" id="branchLookup" placeholder="اكتب كود الفرع… (مثال TNT1)" value="${esc(financeLookupBranch)}" style="flex:1;min-width:180px;" oninput="onBranchLookup(this.value)">
+        <div id="branchLookupResult" style="flex:0 1 auto;min-width:220px;min-height:24px;">${lookupHtml}</div>
       </div>
     </div>
 
@@ -1554,6 +1588,23 @@ async function renderAdminDashboard(){
       <p class="hint" style="margin-top:12px;">إعادة التعيين بتمسح كلمة السر الحالية فقط (من غير ما تلمس بيانات المبيعات)، وبعدها الفرع يدخل بكوده من شاشة الدخول ويعمل كلمة سر جديدة من نفس المكان.</p>
     </div>
     <div class="card">
+      <h3>حسابات الإدارة</h3>
+      <p class="hint" style="margin-bottom:10px;">إعادة تعيين كلمة سر حساب "الإدارة المالية" أو "الدعم الفني" — بعد إعادة التعيين يدخلوا باسم الحساب ويعملوا كلمة سر جديدة من شاشة الدخول.</p>
+      <div class="grid-wrap"><table style="min-width:500px;">
+        <thead><tr><th style="padding:10px;">الحساب</th><th style="padding:10px;">الحالة</th><th style="padding:10px;">إجراء</th></tr></thead>
+        <tbody>
+          ${[{id:FINANCE_USER, label:"الإدارة المالية"}, {id:ADMIN_USER, label:"الدعم الفني"}].map(ac=>{
+            const has = !!(authMap[ac.id] && authMap[ac.id].passwordHash);
+            return `<tr>
+              <td style="padding:10px;font-weight:700;">${esc(ac.label)}</td>
+              <td style="padding:10px;">${has?'<span class="tag green">لديه حساب</span>':'<span class="tag gray">مفيش حساب — أول دخول بيخليك تنشئ كلمة سر</span>'}</td>
+              <td style="padding:10px;">${has ? `<button class="secondary" onclick="resetStaffPassword('${ac.id}')">إعادة تعيين كلمة السر</button>` : '<span class="muted" style="font-size:12px;">لا يوجد شيء لإعادة تعيينه</span>'}</td>
+            </tr>`;
+          }).join("")}
+        </tbody>
+      </table></div>
+    </div>
+    <div class="card">
       <h3>مسح بيانات شهر</h3>
       <p class="hint">اختار السنة والشهر ثم اضغط "مسح الشهر" — بينعمل بيه موافقتين وتأكيد، وبيتمسح الشهر اللي بتختاره انت بس من كل الفروع (المبالغ والملاحظات والمرفقات). باقي الشهور والبيانات لسه محفوظة وثابتة، ومفيش حاجة بتتتمسح تلقائياً.</p>
       <div class="row" style="margin-top:4px;">
@@ -1576,6 +1627,12 @@ async function renderAdminDashboard(){
 async function resetBranchPassword(code){
   if(!confirm("متأكد إنك عايز تصفّر كلمة سر فرع " + code + "؟ الفرع هيحتاج يعمل كلمة سر جديدة أول ما يدخل.")) return;
   await setAuthDoc(code, {passwordHash: null, resetAt: Date.now()});
+  renderAdminDashboard();
+}
+async function resetStaffPassword(id){
+  const label = id===FINANCE_USER ? "الإدارة المالية" : "الدعم الفني";
+  if(!confirm("متأكد إنك عايز تصفّر كلمة سر حساب \"" + label + "\"؟ هيحتاج يعمل كلمة سر جديدة أول ما يدخل.")) return;
+  await setAuthDoc(id, {passwordHash: null, resetAt: Date.now()});
   renderAdminDashboard();
 }
 </script>
