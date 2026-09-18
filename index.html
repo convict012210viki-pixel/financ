@@ -1447,10 +1447,10 @@ function renderFinanceOverview(host){
     if(dn||cn||at) flagged.push({code:d.branch, dn,cn,at});
   });
 
-  const allMethodTotals = PAYMENT_METHODS.map(m=>({method:m, total:allBranchDocs.reduce((a,d)=>a+methodMonthTotal(d,m,daysCount),0)})).filter(x=>x.total>0).sort((a,b)=>b.total-a.total);
+  const allMethodTotals = PAYMENT_METHODS.map(m=>({method:m, total:allBranchDocs.reduce((a,d)=>a+methodMonthTotal(d,m,daysCount),0)})).filter(x=>x.total!==0).sort((a,b)=>b.total-a.total);
 
   const perBranchBreakdown = allBranchDocs.map(d=>{
-    const rows = PAYMENT_METHODS.map(m=>({m, t:methodMonthTotal(d,m,daysCount)})).filter(x=>x.t>0);
+    const rows = PAYMENT_METHODS.map(m=>({m, t:methodMonthTotal(d,m,daysCount)})).filter(x=>x.t!==0);
     const total = branchMonthTotal(d,daysCount);
     if(!total && !rows.length) return "";
     return `<div class="card" style="padding:14px;">
