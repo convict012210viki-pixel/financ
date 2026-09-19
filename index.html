@@ -217,10 +217,17 @@ const FIREBASE_CONFIG = {
 /* ======================= STATE ======================= */
 let db = null, assetsApi = null, downloadsApi = null;
 let currentUser = null; // {type:'branch'|'finance'|'admin', code}
-const today = new Date();
-const CUR_YEAR = today.getFullYear();
-const CUR_MONTH = today.getMonth()+1;
-const TODAY_DAY = today.getDate();
+let today = new Date();
+let CUR_YEAR = today.getFullYear();
+let CUR_MONTH = today.getMonth()+1;
+let TODAY_DAY = today.getDate();
+// بيتنادى كل ما حد يفتح حساب — عشان لو الصفحة فضلت مفتوحة من امبارح ياخد تاريخ النهارده الصح
+function refreshToday(){
+  today = new Date();
+  CUR_YEAR = today.getFullYear();
+  CUR_MONTH = today.getMonth()+1;
+  TODAY_DAY = today.getDate();
+}
 
 function dayKey(d){ return String(d).padStart(2,"0"); }
 function monthKeyOf(y,m){ return y + "-" + String(m).padStart(2,"0"); }
@@ -457,7 +464,7 @@ function renderLogin(mode){
   document.getElementById("tabFinance").onclick = ()=>renderLogin("finance");
   document.getElementById("tabAdmin").onclick = ()=>renderLogin("admin");
   if(mode==="branch") renderBranchLoginBody();
-  else if(mode==="finance") renderSingleLoginBody(FINANCE_USER, "الإدارة المالية", ()=>{ currentUser={type:"finance"}; renderFinanceDashboard(); });
+  else if(mode==="finance") renderSingleLoginBody(FINANCE_USER, "الإدارة المالية", ()=>{ currentUser={type:"finance"}; resetFinanceToYesterday(); renderFinanceDashboard(); });
   else renderSingleLoginBody(ADMIN_USER, "الدعم الفني", ()=>{ currentUser={type:"admin"}; renderAdminDashboard(); });
 }
 
@@ -498,6 +505,7 @@ async function onBranchPicked(e){
         const hash = await sha256(code+":"+pw);
         if(hash === authDoc.passwordHash){
           currentUser = {type:"branch", code};
+          openBranchAtToday();
           renderBranchDashboard();
         }else{
           errEl.textContent = "كلمة السر غير صحيحة";
@@ -536,6 +544,7 @@ async function onBranchPicked(e){
         const hash = await sha256(code+":"+p1);
         await setAuthDoc(code, {passwordHash:hash, createdAt:Date.now()});
         currentUser = {type:"branch", code};
+        openBranchAtToday();
         renderBranchDashboard();
       }catch(ex){
         errEl.textContent = "تعذر إنشاء الحساب: " + (ex && ex.message ? ex.message : "غير معروف");
@@ -617,6 +626,22 @@ function renderShell(navItems, activeId, whoLabel, bodyHtml){
 let branchSalesDoc = null;
 let saveTimer = null;
 let viewYear = CUR_YEAR, viewMonth = CUR_MONTH;
+// أول ما الفرع يفتح: شهر النهارده، وبعدها الجدول بيتحرك لعمود اليوم
+function openBranchAtToday(){
+  refreshToday();
+  viewYear = CUR_YEAR; viewMonth = CUR_MONTH;
+}
+function scrollBranchToToday(){
+  if(!isCurrentMonth(viewYear, viewMonth)) return;
+  const th = document.querySelector("#gridHost th.day-head.today");
+  if(!th) return;
+  th.scrollIntoView({behavior:"auto", block:"nearest", inline:"center"});
+  // على الكمبيوتر بس: حط المؤشر في أول خانة تسجيل لليوم (على الموبايل مش بنفتح الكيبورد لوحده)
+  if(window.matchMedia && window.matchMedia("(pointer:fine)").matches){
+    const inp = document.querySelector('#gridHost input[data-day="'+dayKey(TODAY_DAY)+'"]');
+    if(inp) inp.focus({preventScroll:true});
+  }
+}
 
 function monthNavBar(y, m, onPrev, onNext){
   const canNext = !isCurrentMonth(y,m);
@@ -655,6 +680,7 @@ async function renderBranchDashboard(){
     <div id="modalHost"></div>
   `;
   renderGrid(document.getElementById("gridHost"), branchSalesDoc, true, viewYear, viewMonth);
+  setTimeout(scrollBranchToToday, 60);
 }
 
 async function goBranchMonth(delta){
@@ -1084,6 +1110,17 @@ function rangeLabel(){
 }
 function refDayLabel(){ return financeRefDay + " " + MONTHS_AR[financeMonth-1]; }
 function financeDateValue(){ return financeYear + "-" + dayKey(financeMonth) + "-" + dayKey(financeRefDay); }
+// أول ما الإدارة المالية تفتح: اليوم السابق (لو النهارده أول الشهر ياخد آخر يوم في الشهر اللي فات)
+function resetFinanceToYesterday(){
+  refreshToday();
+  const y = new Date(CUR_YEAR, CUR_MONTH-1, TODAY_DAY-1);
+  financeYear = y.getFullYear();
+  financeMonth = y.getMonth()+1;
+  financeRefDay = y.getDate();
+  financeRangeStart = 1;
+  financeRangeEnd = financeRefDay;
+  financeTab = "overview";
+}
 function destroyCharts(){ chartRefs.forEach(c=>c.destroy()); chartRefs=[]; }
 
 function dayTotal(doc, day){
@@ -1127,16 +1164,7 @@ async function renderFinanceDashboard(){
     const saved = await getReconcileDoc();
     if(saved && saved.rows && Array.isArray(saved.rows) && saved.rows.length){
       financeReconcile = saved;
-      if(saved.view && isPastOrCurrent(saved.view.y, saved.view.m)){
-        financeYear = saved.view.y;
-        financeMonth = saved.view.m;
-        const dim = daysInMonthOf(financeYear, financeMonth);
-        const end = Math.max(1, Math.min(Number(saved.view.end)||dim, dim));
-        const start = Math.max(1, Math.min(Number(saved.view.start)||1, end));
-        financeRefDay = end;
-        financeRangeStart = start;
-        financeRangeEnd = end;
-      }
+      // ملحوظة: مبنرجعش التاريخ اللي كان محفوظ مع الشيت — الافتتاح دايماً على اليوم السابق
     }
   }
   await loadFinanceMonth();
@@ -1477,7 +1505,7 @@ function renderReconcileResult(host){
   host.innerHTML = `
     <div class="kpi" style="margin-top:14px;">
       <div class="box"><div class="num">${fmtNum(grandRec)}</div><div class="lbl">إجمالي المسجل (${rangeLabel()})</div></div>
-      <div class="box"><div class="num">${fmtNum(grandSheet)}</div><div class="lbl">إجمالي الشيت (${rowsIn} صف داخل النطاق)</div></div>
+      <div class="box"><div class="num">${fmtNum(grandSheet)}</div><div class="lbl">إجمالي الشيت</div></div>
       <div class="box"><div class="num">${matchBranches}</div><div class="lbl">فروع مطابقة</div></div>
       <div class="box"><div class="num">${mismatchBranches}</div><div class="lbl">فروع غير مطابقة</div></div>
     </div>
